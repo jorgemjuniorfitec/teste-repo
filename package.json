@@ -38,7 +38,6 @@
   ],
   "author": "Fitec Labs",
   "license": "UNLICENSED",
-  "private": true,
   "dependencies": {
     "@inquirer/prompts": "^5.3.8",
     "chalk": "^5.3.0",
