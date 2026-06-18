@@ -5,11 +5,12 @@ Sem interface gráfica, sem microserviços, sem servidor. O "backend" é um
 **repositório Git** que guarda as skills e um índice. O CLI (`skills`) clona/atualiza
 esse repo, busca, instala e publica skills.
 
-O CLI é escrito em **TypeScript** e distribuído como **pacote privado no NPM**
-(`@empresa/skills`), instalável com `npm install -g @empresa/skills`.
+O CLI é escrito em **TypeScript** e distribuído como **pacote privado no GitHub
+Packages** (`@jorgemjuniorfitec/skills`), instalável com
+`npm install -g @jorgemjuniorfitec/skills`.
 
-> Filosofia: usar o que já existe (Git + NPM + filesystem). A primeira versão
-> precisa ser instalável e útil em um dia.
+> Filosofia: usar o que já existe (Git + GitHub Packages + filesystem). A
+> primeira versão precisa ser instalável e útil em um dia.
 
 ---
 
@@ -162,7 +163,7 @@ Diretórios usados em runtime na máquina do usuário:
 | Manifesto       | YAML (`yaml`) validado c/ zod | legível p/ humanos + validação de schema        |
 | Backend         | Git (via `simple-git`)        | zero infra nova, versionamento de graça         |
 | Build           | tsup (esbuild)                | bundle rápido de `src` → `dist`                 |
-| Distribuição    | NPM privado (`@empresa/skills`)| `npm install -g @empresa/skills`               |
+| Distribuição    | GitHub Packages (privado)     | grátis p/ repo privado, usa permissões do GitHub|
 | Testes          | Vitest                        | rápido, integrado ao ecossistema TS             |
 
 ---
@@ -180,20 +181,29 @@ Diretórios usados em runtime na máquina do usuário:
 
 ---
 
-## 7.1 Distribuição via NPM privado
+## 7.1 Distribuição via GitHub Packages
 
-O CLI é publicado como pacote **scoped privado** na conta NPM da empresa.
+O CLI é publicado como pacote **scoped privado** no GitHub Packages. O escopo do
+pacote **precisa bater com o owner do repositório no GitHub** — daí
+`@jorgemjuniorfitec/skills`.
 
 `package.json` (trechos relevantes):
 ```json
 {
-  "name": "@empresa/skills",
+  "name": "@jorgemjuniorfitec/skills",
   "version": "1.0.0",
   "bin": { "skills": "dist/index.js" },
   "files": ["dist"],
   "type": "module",
   "engines": { "node": ">=18" },
-  "publishConfig": { "access": "restricted" },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jorgemjuniorfitec/teste-repo.git"
+  },
   "scripts": {
     "build": "tsup src/index.ts --format esm --clean",
     "prepublishOnly": "npm run build"
@@ -201,23 +211,54 @@ O CLI é publicado como pacote **scoped privado** na conta NPM da empresa.
 }
 ```
 
-Publicação:
-```bash
-npm login                          # autentica na conta da empresa
-npm publish                        # access "restricted" => pacote privado
+### Publicação
+A forma recomendada é via **GitHub Actions** (sem token pessoal no processo):
+
+```yaml
+# .github/workflows/publish.yml
+name: Publish package
+on:
+  release:
+    types: [published]
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write          # permite publicar no GitHub Packages
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://npm.pkg.github.com
+      - run: npm ci
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Instalação pelos colaboradores (precisam de acesso à org/escopo `@empresa`):
+Publicação manual (alternativa), usando um PAT com escopo `write:packages`:
 ```bash
-# uma vez: aponta o escopo para o registry e autentica
-npm config set @empresa:registry https://registry.npmjs.org/
-npm install -g @empresa/skills
+npm publish
 ```
 
-> Pré-requisito: o escopo `@empresa` precisa pertencer a uma **organização NPM
-> paga** (pacotes privados não são gratuitos). Alternativa, se já houver: um
-> registry interno (Verdaccio, GitHub Packages, Artifactory) — basta trocar o
-> `registry` no `npm config`.
+### Instalação pelos colaboradores
+Cada pessoa precisa de um **Personal Access Token** com `read:packages` e de
+um `.npmrc` apontando o escopo para o GitHub Packages:
+
+```ini
+# ~/.npmrc
+@jorgemjuniorfitec:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+```bash
+npm install -g @jorgemjuniorfitec/skills
+```
+
+> Vantagens vs. NPM privado: **sem custo extra** para repositórios privados e as
+> permissões de quem pode ler/publicar vêm direto do acesso ao repositório no
+> GitHub. Custo: todo mundo precisa configurar um PAT no `.npmrc` (passo único).
 
 ---
 
@@ -227,7 +268,7 @@ npm install -g @empresa/skills
 - [ ] `init`, `update`, `search`, `info`, `install`, `list`, `run`
 - [ ] Parse e validação do `skill.yaml` (zod)
 - [ ] Leitura do `index.json`
-- [ ] Publicar como `@empresa/skills` no NPM privado
+- [ ] Publicar como `@jorgemjuniorfitec/skills` no GitHub Packages
 
 ### v2 — Publicação e qualidade
 - [ ] `publish` com geração automática do `index.json`
@@ -244,8 +285,8 @@ npm install -g @empresa/skills
 
 ## 9. Próximos Passos
 
-1. Confirmar a conta/organização NPM (ou registry interno) e o escopo (`@empresa`).
+1. Confirmar o escopo no GitHub Packages (`@jorgemjuniorfitec` ou uma org) e o fluxo de PAT para o time.
 2. Criar o repositório Git interno que servirá de marketplace (vazio, com 1 skill de exemplo).
 3. Scaffold do CLI TypeScript (`package.json` + `src/cli.ts` com os comandos da v1).
 4. Implementar o caminho feliz: `init → update → search → install → run`.
-5. Publicar a `v0` no NPM privado e testar com 2–3 skills reais do time.
+5. Publicar a `v0` no GitHub Packages e testar com 2–3 skills reais do time.
