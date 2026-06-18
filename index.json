@@ -1,0 +1,13 @@
+{
+  "updated_at": "2026-06-18T00:00:00Z",
+  "skills": [
+    {
+      "name": "commit-conventions",
+      "version": "1.0.0",
+      "description": "Padrão de mensagens de commit do time (Conventional Commits em pt-BR)",
+      "author": "jorge@empresa.com",
+      "tags": ["git", "padrao", "time"],
+      "path": "skills/commit-conventions"
+    }
+  ]
+}

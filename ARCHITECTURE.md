@@ -40,27 +40,85 @@ Packages** (`@jorgemjuniorfitec/skills`), instalável com
 
 ## 2. Anatomia de uma Skill
 
-Cada skill é uma pasta com um manifesto `skill.yaml`:
+Cada skill é uma pasta com um manifesto `skill.yaml`. O conteúdo é escrito **uma
+vez, de forma neutra**, e o instalador o adapta para a ferramenta de cada dev.
 
 ```yaml
-# skills/cep-lookup/skill.yaml
-name: cep-lookup
+# skills/commit-conventions/skill.yaml
+name: commit-conventions
 version: 1.0.0
-description: Consulta endereço a partir de um CEP
+description: Padrão de mensagens de commit do time
 author: jorge@empresa.com
-tags: [util, http, brasil]
-type: script            # script | prompt | template
-entrypoint: main.py     # arquivo executado ao rodar a skill
-runtime: python         # python | shell | none
+tags: [git, padrao, time]
+type: instruction         # instruction | prompt | command | script | template
+content: content.md       # arquivo-fonte neutro da skill
+targets: [claude, copilot, cursor, vscode]   # ou "all"
 ```
 
-Tipos de skill suportados na v1:
+Tipos de skill suportados:
 
-| type     | O que é                            | Como roda                       |
-|----------|------------------------------------|---------------------------------|
-| `script` | Script executável (Python/shell)   | `skills run <nome> [args]`      |
-| `prompt` | Prompt/template de IA              | copiado p/ uso manual ou agente |
-| `template`| Boilerplate de arquivos           | copiado para o diretório atual  |
+| type          | O que é                              | Para quem serve                       |
+|---------------|--------------------------------------|---------------------------------------|
+| `instruction` | Regras/contexto persistente p/ a IA  | Claude (CLAUDE.md), Copilot, Cursor   |
+| `prompt`      | Prompt reutilizável (one-shot)       | qualquer assistente de IA             |
+| `command`     | Slash command / prompt file          | Claude (commands), Copilot prompts    |
+| `script`      | Script executável (node/shell)       | rodado via `skills run`               |
+| `template`    | Boilerplate de arquivos              | copiado para o diretório atual        |
+
+---
+
+## 2.1 Instalador multi-ferramenta (o "assistente de instalação")
+
+> Times mistos: alguns devs usam **GitHub Copilot**, outros **Claude**, e as
+> **IDEs variam** (VS Code, JetBrains, Cursor...). A skill não pode assumir um
+> formato/local único. A solução é separar **conteúdo neutro** de **adaptadores**.
+
+```
+                          skill (content.md neutro)
+                                    │
+                    ┌───────────────┼────────────────────┐
+                    ▼               ▼                     ▼
+            ┌───────────┐   ┌───────────┐         ┌─────────────┐
+            │ adapter   │   │ adapter   │   ...   │ adapter      │
+            │ claude    │   │ copilot   │         │ cursor/vscode│
+            └─────┬─────┘   └─────┬─────┘         └──────┬──────┘
+                  ▼               ▼                      ▼
+        .claude/ , CLAUDE.md   .github/copilot-      .cursor/rules/ ,
+        .claude/commands/      instructions.md ,     .vscode/ ...
+                               .github/prompts/
+```
+
+### Como funciona o assistente
+Ao rodar `skills install <nome>`, o CLI:
+1. **Detecta** o ambiente do projeto/dev (procura `.claude/`, `.github/`,
+   `.cursor/`, `.vscode/`, `.idea/`, etc.) e quais ferramentas estão presentes.
+2. **Cruza** com os `targets` declarados na skill.
+3. **Pergunta** (interativo) ou usa flags (`--target claude,copilot`) para
+   confirmar onde instalar — com a opção "todos os detectados".
+4. **Renderiza** o conteúdo via adapter e grava no local certo de cada ferramenta.
+5. **Registra** a instalação em `~/.skills/installed/<nome>` (manifest + de-onde),
+   permitindo `update` e `remove` limpos.
+
+### Mapa de adaptadores (alvos da v1)
+
+| Adapter    | Onde escreve (projeto)                              | Tipos suportados            |
+|------------|----------------------------------------------------|-----------------------------|
+| `claude`   | `CLAUDE.md`, `.claude/commands/`, `.claude/skills/`| instruction, command, prompt|
+| `copilot`  | `.github/copilot-instructions.md`, `.github/prompts/`| instruction, command, prompt|
+| `cursor`   | `.cursor/rules/*.mdc`                               | instruction, prompt         |
+| `vscode`   | `.vscode/` (settings/prompts) ou arquivo + instrução| prompt, template            |
+| `jetbrains`| `.idea/` ou pasta de projeto + instrução           | prompt, template            |
+| `generic`  | copia o arquivo + imprime instruções de uso        | qualquer                    |
+
+> O conjunto de adapters é **plugável**: adicionar/remover uma ferramenta é
+> escrever um novo módulo em `src/adapters/` sem mexer no resto. Assim o
+> marketplace acompanha novas IDEs/assistentes sem reescrever skills.
+
+### Escopo: projeto vs. global
+- **Projeto** (padrão): grava nos arquivos do repositório atual (versionável,
+  compartilhado pelo time daquele projeto).
+- **Global** (`--global`): grava na config do usuário (ex.: `~/.claude/`,
+  settings do VS Code), valendo para todos os projetos do dev.
 
 ---
 
@@ -90,24 +148,34 @@ em cada busca.
 ## 4. Comandos do CLI (v1)
 
 ```bash
-skills init                 # configura o repo do marketplace (URL Git) localmente
-skills update               # git pull do repo do marketplace
-skills search <termo>       # busca no index.json (nome/desc/tags)
-skills info <nome>          # mostra detalhes de uma skill
-skills install <nome>       # copia a skill para ~/.skills/<nome>
-skills list                 # lista skills instaladas localmente
-skills run <nome> [args]    # executa uma skill instalada
-skills publish <pasta>      # valida, adiciona ao repo, atualiza index e commita
-skills remove <nome>        # remove skill instalada localmente
+skills init                       # configura o repo do marketplace (URL Git)
+skills update                     # git pull do repo do marketplace
+skills search <termo>             # busca no index.json (nome/desc/tags)
+skills info <nome>                # mostra detalhes de uma skill
+skills doctor                     # detecta ferramentas/IDEs presentes no ambiente
+skills install <nome> [opts]      # assistente: detecta alvos e instala (ver abaixo)
+skills list                       # lista skills instaladas localmente
+skills run <nome> [args]          # executa uma skill instalada (type: script)
+skills publish <pasta>            # valida, adiciona ao repo, atualiza index e commita
+skills remove <nome>              # remove skill instalada (de todos os alvos)
+```
+
+Opções do `install`:
+```bash
+skills install commit-conventions               # interativo: detecta e pergunta os alvos
+skills install commit-conventions --target claude,copilot   # alvos explícitos
+skills install commit-conventions --all         # todos os alvos detectados
+skills install commit-conventions --global      # instala na config do usuário, não no projeto
+skills install commit-conventions --yes         # não-interativo (CI/scripts)
 ```
 
 Fluxo típico de quem **consome**:
 ```bash
-skills init https://git.empresa.com/skills-marketplace.git
+skills init https://github.com/jorgemjuniorfitec/teste-repo.git
 skills update
-skills search relatorio
-skills install gerar-relatorio
-skills run gerar-relatorio --mes 06
+skills doctor                  # "Detectado: Claude (.claude/), Copilot (.github/)"
+skills search commit
+skills install commit-conventions   # pergunta: instalar para Claude? Copilot? ambos?
 ```
 
 Fluxo típico de quem **publica**:
@@ -133,14 +201,27 @@ skills-cli/
 │   ├── config.ts            # ~/.skills/config.json (URL do repo, paths)
 │   ├── registry.ts          # clone/pull do repo, leitura do index.json
 │   ├── manifest.ts          # parse + validação do skill.yaml (zod)
-│   ├── installer.ts         # copiar skill p/ ~/.skills, listar, remover
+│   ├── detect.ts            # detecção de ferramentas/IDEs no ambiente
+│   ├── installer.ts         # orquestra: escolhe adapters, grava, registra
 │   ├── runner.ts            # executar skill instalada (run)
-│   └── publisher.ts         # publish: validar, copiar, atualizar index, commit
-├── dist/                    # saída compilada (tsup) — publicada no NPM
+│   ├── publisher.ts         # publish: validar, copiar, atualizar index, commit
+│   └── adapters/            # um módulo por ferramenta (plugável)
+│       ├── types.ts         #   interface Adapter { id, detect(), apply(), remove() }
+│       ├── claude.ts
+│       ├── copilot.ts
+│       ├── cursor.ts
+│       ├── vscode.ts
+│       ├── jetbrains.ts
+│       ├── generic.ts
+│       └── index.ts         #   registro de todos os adapters
+├── dist/                    # saída compilada (tsup) — publicada no GitHub Packages
 └── tests/
     ├── manifest.test.ts
     ├── registry.test.ts
-    └── installer.test.ts
+    ├── detect.test.ts
+    └── adapters/
+        ├── claude.test.ts
+        └── copilot.test.ts
 ```
 
 Diretórios usados em runtime na máquina do usuário:
@@ -265,12 +346,16 @@ npm install -g @jorgemjuniorfitec/skills
 ## 8. Roadmap
 
 ### v1 — MVP (o essencial)
-- [ ] `init`, `update`, `search`, `info`, `install`, `list`, `run`
+- [ ] `init`, `update`, `search`, `info`, `list`
 - [ ] Parse e validação do `skill.yaml` (zod)
 - [ ] Leitura do `index.json`
+- [ ] `detect` + `doctor`: detecção de ferramentas/IDEs
+- [ ] `install` com assistente multi-ferramenta + adapters `claude`, `copilot`, `generic`
 - [ ] Publicar como `@jorgemjuniorfitec/skills` no GitHub Packages
 
-### v2 — Publicação e qualidade
+### v2 — Mais alvos, publicação e qualidade
+- [ ] Adapters `cursor`, `vscode`, `jetbrains`
+- [ ] `run` para skills do tipo `script`
 - [ ] `publish` com geração automática do `index.json`
 - [ ] `--pr` para abrir Pull Request em vez de commit direto
 - [ ] Versionamento (instalar versão específica, `skills update <nome>`)

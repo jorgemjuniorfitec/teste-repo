@@ -1,0 +1,8 @@
+name: commit-conventions
+version: 1.0.0
+description: Padrão de mensagens de commit do time (Conventional Commits em pt-BR)
+author: jorge@empresa.com
+tags: [git, padrao, time]
+type: instruction
+content: content.md
+targets: all

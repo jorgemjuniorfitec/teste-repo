@@ -1,0 +1,5 @@
+# Copie para ~/.npmrc (ou .npmrc do projeto) para instalar @jorgemjuniorfitec/skills.
+# Crie um Personal Access Token (classic) com escopo read:packages e exporte:
+#   export GITHUB_TOKEN=ghp_xxx
+@jorgemjuniorfitec:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
