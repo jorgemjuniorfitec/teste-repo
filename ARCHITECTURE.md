@@ -40,20 +40,55 @@ Packages** (`@jorgemjuniorfitec/skills`), instalável com
 
 ## 2. Anatomia de uma Skill
 
-Cada skill é uma pasta com um manifesto `skill.yaml`. O conteúdo é escrito **uma
-vez, de forma neutra**, e o instalador o adapta para a ferramenta de cada dev.
+Cada skill é uma pasta. O conteúdo é escrito **uma vez, de forma neutra**, e o
+instalador o adapta para a ferramenta de cada dev. A estrutura é **em camadas**:
+o mínimo é `skill.yaml` + `content.md`; as demais camadas são opcionais e entram
+conforme a skill amadurece.
+
+```
+skills/<nome>/
+├── skill.yaml          # OBRIGATÓRIO — manifesto (fonte única da verdade)
+├── content.md          # OBRIGATÓRIO — payload neutro da skill
+├── README.md           # recomendado — doc para humanos no catálogo
+├── CHANGELOG.md        # recomendado — o que mudou entre versões
+├── targets/            # opcional — override de conteúdo por ferramenta
+│   └── copilot.md      #   usado no lugar do content.md p/ aquele alvo
+├── examples/           # opcional — casos de uso, entradas/saídas
+├── assets/             # opcional — arquivos referenciados (scripts, templates)
+└── eval/
+    └── cases.yaml      # opcional — prova que a skill funciona (regressão)
+```
+
+### Manifesto (`skill.yaml`)
 
 ```yaml
-# skills/commit-conventions/skill.yaml
 name: commit-conventions
 version: 1.0.0
 description: Padrão de mensagens de commit do time
-author: jorge@empresa.com
-tags: [git, padrao, time]
 type: instruction         # instruction | prompt | command | script | template
-content: content.md       # arquivo-fonte neutro da skill
-targets: [claude, copilot, cursor, vscode]   # ou "all"
+content: content.md
+
+status: stable            # experimental | beta | stable | deprecated
+owners:                   # governança: quem chamar quando quebrar
+  team: plataforma
+  contact: "#guilda-dev"
+category: git
+
+tags: [git, padrao]
+targets: all              # ou [claude, copilot]
+scope: project            # project | global
+
+requires:                 # dependências verificáveis
+  tools: []               #   ex.: [node>=18, gh]
+  env: []                 #   ex.: [JIRA_TOKEN]
+  mcp: []
+variables: []             # parâmetros (templates/prompts)
 ```
+
+Campos que sustentam a robustez num marketplace **interno**:
+- **`status`** — separa experimento de padrão oficial (evita catálogo-lixão).
+- **`owners.contact`** — a pergunta nº1 quando algo quebra é "quem eu chamo?".
+- **`requires`** — evita o "instalei e não funciona" silencioso.
 
 Tipos de skill suportados:
 
@@ -64,6 +99,25 @@ Tipos de skill suportados:
 | `command`     | Slash command / prompt file          | Claude (commands), Copilot prompts    |
 | `script`      | Script executável (node/shell)       | rodado via `skills run`               |
 | `template`    | Boilerplate de arquivos              | copiado para o diretório atual        |
+
+### Override por ferramenta (`targets/<alvo>.md`)
+
+90% das skills usam só o `content.md` neutro. Quando o fraseado precisa diferir
+por ferramenta, basta criar `targets/<alvo>.md` — o adapter usa o override se
+existir e cai no neutro caso contrário. Zero configuração extra no manifesto.
+
+### Validação (`skills lint`) e autoria (`skills new`)
+
+- **`skills new <nome>`** gera a pasta já na estrutura recomendada (manifesto
+  rico, content, README, CHANGELOG e `eval/cases.yaml`). A "forma certa" é o
+  caminho de menor esforço.
+- **`skills lint`** roda no **CI do marketplace** e barra PR com erro: manifesto
+  inválido, `content`/`entrypoint` inexistente, `name` ≠ pasta, override para
+  alvo desconhecido, `eval/cases.yaml` malformado. Avisos (sem README/CHANGELOG,
+  `status: experimental`) não bloqueiam.
+- **`skills eval <dir>`** roda os casos: para `script`, executa o entrypoint e
+  compara o stdout; para `prompt`/`instruction`, valida a estrutura (execução
+  real do prompt exige provider de IA — fase futura).
 
 ---
 

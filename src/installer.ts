@@ -3,7 +3,12 @@ import { readFile, mkdir, writeFile, rm } from "node:fs/promises";
 import { INSTALLED_DIR } from "./config.js";
 import { getAdapter } from "./adapters/index.js";
 import type { AppliedChange, InstallContext } from "./adapters/types.js";
-import { resolveTargets, type Manifest, type Target } from "./manifest.js";
+import {
+  resolveTargets,
+  targetOverridePath,
+  type Manifest,
+  type Target,
+} from "./manifest.js";
 import { exists } from "./adapters/shared.js";
 
 /** Registro persistido de uma instalação, para `update`/`remove`. */
@@ -36,16 +41,31 @@ export function compatibleTargets(manifest: Manifest, candidates: Target[]): Tar
   });
 }
 
+/**
+ * Resolve o conteúdo a instalar para um alvo: usa `targets/<alvo>.md` se existir
+ * (override por ferramenta), senão cai no `content` neutro da skill.
+ */
+export async function resolveContent(
+  sourceDir: string,
+  manifest: Manifest,
+  target: Target,
+): Promise<string> {
+  const override = join(sourceDir, targetOverridePath(target));
+  if (await exists(override)) {
+    return readFile(override, "utf8");
+  }
+  return readFile(join(sourceDir, manifest.content), "utf8");
+}
+
 export async function installSkill(opts: InstallOptions): Promise<InstallRecord> {
   const { manifest, sourceDir, rootDir, scope, targets } = opts;
-  const content = await readFile(join(sourceDir, manifest.content), "utf8");
-
-  const ctx: InstallContext = { manifest, content, sourceDir, rootDir, scope };
   const changes: AppliedChange[] = [];
 
   for (const target of targets) {
     const adapter = getAdapter(target);
     if (!adapter) continue;
+    const content = await resolveContent(sourceDir, manifest, target);
+    const ctx: InstallContext = { manifest, content, sourceDir, rootDir, scope };
     changes.push(await adapter.apply(ctx));
   }
 

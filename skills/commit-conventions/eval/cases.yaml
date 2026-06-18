@@ -1,0 +1,7 @@
+cases:
+  - name: gera commit de feature com tipo e escopo
+    input: "adicionei login via SSO no módulo de autenticação"
+    expect_contains: "feat(auth):"
+  - name: respeita imperativo em português
+    input: "corrigi o timeout no endpoint de relatórios"
+    expect_contains: "fix"

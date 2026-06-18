@@ -16,8 +16,19 @@ import {
   listInstalled,
   uninstallSkill,
 } from "./installer.js";
-import { resolveTargets, type Target } from "./manifest.js";
+import {
+  resolveTargets,
+  SkillTypeSchema,
+  parseManifest,
+  type SkillType,
+  type Target,
+} from "./manifest.js";
 import { getAdapter } from "./adapters/index.js";
+import { lintAll, lintSkill, type LintIssue } from "./lint.js";
+import { newSkill } from "./generator.js";
+import { runEval } from "./eval.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -77,11 +88,24 @@ export function buildProgram(): Command {
       const entry = await findEntry(nome);
       if (!entry) return notFound(nome);
       const { manifest } = await loadSkillManifest(entry);
-      console.log(chalk.bold(manifest.name), chalk.dim(`v${manifest.version}`));
+      console.log(
+        chalk.bold(manifest.name),
+        chalk.dim(`v${manifest.version}`),
+        statusBadge(manifest.status),
+      );
       console.log(manifest.description);
-      console.log(chalk.dim(`autor: ${manifest.author}`));
       console.log(chalk.dim(`tipo: ${manifest.type}`));
+      console.log(
+        chalk.dim(`mantido por: ${manifest.owners.team} (${manifest.owners.contact})`),
+      );
+      if (manifest.category) console.log(chalk.dim(`categoria: ${manifest.category}`));
       console.log(chalk.dim(`alvos: ${resolveTargets(manifest).join(", ")}`));
+      const reqs = [
+        ...manifest.requires.tools.map((t) => `tool:${t}`),
+        ...manifest.requires.env.map((e) => `env:${e}`),
+        ...manifest.requires.mcp.map((m) => `mcp:${m}`),
+      ];
+      if (reqs.length) console.log(chalk.dim(`requer: ${reqs.join(", ")}`));
     });
 
   program
@@ -167,7 +191,96 @@ export function buildProgram(): Command {
       );
     });
 
+  // --- Comandos de autoria ---
+
+  program
+    .command("new")
+    .argument("<nome>", "nome da skill (kebab-case)")
+    .option("-t, --type <tipo>", "tipo da skill", "instruction")
+    .option("-d, --dir <pasta>", "pasta base do catálogo", "skills")
+    .description("cria o esqueleto de uma skill na estrutura recomendada")
+    .action(async (nome: string, opts: { type: string; dir: string }) => {
+      const parsedType = SkillTypeSchema.safeParse(opts.type);
+      if (!parsedType.success) {
+        console.log(
+          chalk.red(`tipo inválido: ${opts.type}`),
+          chalk.dim(`(use: ${SkillTypeSchema.options.join(", ")})`),
+        );
+        process.exitCode = 1;
+        return;
+      }
+      const dir = await newSkill({
+        name: nome,
+        type: parsedType.data as SkillType,
+        baseDir: opts.dir,
+      });
+      console.log(chalk.green(`✓ Skill criada em ${dir}`));
+      console.log(chalk.dim("Edite skill.yaml/content.md e rode: skills lint " + dir));
+    });
+
+  program
+    .command("lint")
+    .argument("[dir]", "pasta de uma skill (default: faz lint de todo o catálogo)")
+    .option("-d, --dir <pasta>", "pasta base do catálogo p/ --all", "skills")
+    .description("valida skills (manifesto, conteúdo, overrides, eval)")
+    .action(async (dir: string | undefined, opts: { dir: string }) => {
+      const issues = dir ? await lintSkill(dir) : await lintAll(opts.dir);
+      reportLint(issues);
+    });
+
+  program
+    .command("eval")
+    .argument("<dir>", "pasta da skill a avaliar")
+    .description("executa os casos de eval da skill")
+    .action(async (dir: string) => {
+      const manifest = parseManifest(await readFile(join(dir, "skill.yaml"), "utf8"));
+      const results = await runEval(dir, manifest);
+      let failed = 0;
+      for (const r of results) {
+        const mark = r.ok ? chalk.green("✓") : chalk.red("✗");
+        if (!r.ok) failed++;
+        console.log(`  ${mark} ${r.name}${r.detail ? chalk.dim(` — ${r.detail}`) : ""}`);
+      }
+      if (failed > 0) {
+        console.log(chalk.red(`${failed} caso(s) falharam.`));
+        process.exitCode = 1;
+      } else {
+        console.log(chalk.green("Eval OK."));
+      }
+    });
+
   return program;
+}
+
+function statusBadge(status: string): string {
+  switch (status) {
+    case "stable":
+      return chalk.green("[stable]");
+    case "beta":
+      return chalk.yellow("[beta]");
+    case "deprecated":
+      return chalk.red("[deprecated]");
+    default:
+      return chalk.dim("[experimental]");
+  }
+}
+
+function reportLint(issues: LintIssue[]): void {
+  if (issues.length === 0) {
+    console.log(chalk.green("✓ Sem problemas."));
+    return;
+  }
+  const errors = issues.filter((i) => i.level === "error");
+  for (const i of issues) {
+    const tag = i.level === "error" ? chalk.red("erro") : chalk.yellow("aviso");
+    console.log(`  ${tag} ${chalk.bold(i.skill)}: ${i.message}`);
+  }
+  console.log(
+    chalk.dim(
+      `${errors.length} erro(s), ${issues.length - errors.length} aviso(s).`,
+    ),
+  );
+  if (errors.length > 0) process.exitCode = 1;
 }
 
 interface InstallFlags {
