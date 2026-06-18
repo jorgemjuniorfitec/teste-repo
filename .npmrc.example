@@ -1,5 +1,21 @@
-# Copie para ~/.npmrc (ou .npmrc do projeto) para instalar @jorgemjuniorfitec/skills.
-# Crie um Personal Access Token (classic) com escopo read:packages e exporte:
-#   export GITHUB_TOKEN=ghp_xxx
+# Configuração para instalar o pacote privado @jorgemjuniorfitec/skills.
+#
+# 1) Crie um Personal Access Token CLASSIC (não fine-grained) com o escopo
+#    read:packages em: https://github.com/settings/tokens
+# 2) Copie as DUAS linhas abaixo para o seu ~/.npmrc pessoal
+#    (Windows: C:\Users\<voce>\.npmrc).
+# 3) Troque {SEU_TOKEN} pelo token gerado (ele vai DENTRO de _authToken=).
+#
+# Importante: as duas linhas são obrigatórias. A primeira roteia o escopo
+# @jorgemjuniorfitec para o GitHub Packages; sem ela o npm procura no
+# registro público (npmjs.org) e retorna 404.
+
 @jorgemjuniorfitec:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+//npm.pkg.github.com/:_authToken={SEU_TOKEN}
+
+# --- Alternativa sem deixar o token no arquivo ---
+# Em vez da linha _authToken acima, use a expansão de variável de ambiente:
+#   //npm.pkg.github.com/:_authToken=${NPM_GITHUB_TOKEN}
+# e exporte a variável no seu shell antes de instalar:
+#   Linux/macOS:  export NPM_GITHUB_TOKEN=ghp_xxx
+#   Windows (PowerShell): $env:NPM_GITHUB_TOKEN="ghp_xxx"

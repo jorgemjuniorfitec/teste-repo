@@ -8,12 +8,18 @@ forma neutra e o instalador as adapta para a ferramenta de cada dev — **Claude
 
 ## Instalação
 
-1. Configure o acesso ao GitHub Packages (passo único):
-   ```bash
-   cp .npmrc.example ~/.npmrc       # ou edite seu ~/.npmrc
-   export GITHUB_TOKEN=ghp_xxx      # PAT com escopo read:packages
+1. Crie um **Personal Access Token (classic)** com o escopo **`read:packages`**
+   em https://github.com/settings/tokens.
+2. Adicione **as duas linhas** abaixo ao seu `~/.npmrc` pessoal
+   (no Windows: `C:\Users\<voce>\.npmrc`), trocando `{SEU_TOKEN}` pelo token:
+   ```ini
+   @jorgemjuniorfitec:registry=https://npm.pkg.github.com
+   //npm.pkg.github.com/:_authToken={SEU_TOKEN}
    ```
-2. Instale o CLI:
+   > A primeira linha é obrigatória: ela roteia o escopo para o GitHub Packages.
+   > Sem ela, o npm procura no npmjs.org e retorna **404**.
+   > Não coloque o token numa linha solta como `GITHUB_TOKEN=...` — npm ignora.
+3. Instale o CLI:
    ```bash
    npm install -g @jorgemjuniorfitec/skills
    ```
