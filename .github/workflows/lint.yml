@@ -18,5 +18,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Build CLI
+        run: npm run build
       - name: Lint skills catalog
-        run: npm run build && node dist/index.js lint
+        run: node dist/index.js lint
+      - name: Check index.json is up to date
+        run: node dist/index.js index --check

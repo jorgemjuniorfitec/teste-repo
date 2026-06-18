@@ -10,7 +10,9 @@ export interface IndexEntry {
   name: string;
   version: string;
   description: string;
-  author: string;
+  type: string;
+  status: string;
+  category?: string;
   tags: string[];
   path: string;
 }

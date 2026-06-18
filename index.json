@@ -1,12 +1,18 @@
 {
-  "updated_at": "2026-06-18T00:00:00Z",
+  "updated_at": "2026-06-18T01:26:20.546Z",
   "skills": [
     {
       "name": "commit-conventions",
       "version": "1.0.0",
       "description": "Padrão de mensagens de commit do time (Conventional Commits em pt-BR)",
-      "author": "jorge@empresa.com",
-      "tags": ["git", "padrao", "time"],
+      "type": "instruction",
+      "status": "stable",
+      "category": "git",
+      "tags": [
+        "git",
+        "padrao",
+        "convencional"
+      ],
       "path": "skills/commit-conventions"
     }
   ]

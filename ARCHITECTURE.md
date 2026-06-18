@@ -210,8 +210,13 @@ skills doctor                     # detecta ferramentas/IDEs presentes no ambien
 skills install <nome> [opts]      # assistente: detecta alvos e instala (ver abaixo)
 skills list                       # lista skills instaladas localmente
 skills run <nome> [args]          # executa uma skill instalada (type: script)
-skills publish <pasta>            # valida, adiciona ao repo, atualiza index e commita
 skills remove <nome>              # remove skill instalada (de todos os alvos)
+
+# --- autoria (local; a publicação é via Git/PR, ver seção 6.1) ---
+skills new <nome> [--type t]      # cria o esqueleto de uma skill
+skills lint [dir]                 # valida skill(s)
+skills eval <dir>                 # roda os casos de eval
+skills index [--check]            # gera/verifica o index.json
 ```
 
 Opções do `install`:
@@ -232,11 +237,15 @@ skills search commit
 skills install commit-conventions   # pergunta: instalar para Claude? Copilot? ambos?
 ```
 
-Fluxo típico de quem **publica**:
+Fluxo típico de quem **publica** (via Git/PR — ver seção 6.1):
 ```bash
-skills publish ./minha-skill      # valida o skill.yaml, copia p/ repo clonado
-                                  # atualiza index.json e faz commit
-git push                          # ou o CLI abre um PR (config opcional)
+skills new minha-skill            # gera o esqueleto na estrutura recomendada
+# edita skill.yaml / content.md ...
+skills lint skills/minha-skill    # valida localmente
+skills eval skills/minha-skill    # roda os casos de eval
+skills index                      # regenera o index.json (não editar à mão)
+git add skills/minha-skill index.json && git commit && git push
+# abre Pull Request -> CI + aprovação humana (CODEOWNERS) -> merge
 ```
 
 ---
@@ -245,9 +254,10 @@ git push                          # ou o CLI abre um PR (config opcional)
 
 ```
 skills-cli/
-├── package.json             # nome @empresa/skills, bin "skills", scripts
+├── package.json             # nome @jorgemjuniorfitec/skills, bin "skills"
 ├── tsconfig.json
 ├── README.md
+├── CONTRIBUTING.md          # fluxo de contribuição via Git/PR
 ├── ARCHITECTURE.md          # este documento
 ├── src/
 │   ├── index.ts             # entrypoint do bin (shebang) + registro de comandos
@@ -257,8 +267,10 @@ skills-cli/
 │   ├── manifest.ts          # parse + validação do skill.yaml (zod)
 │   ├── detect.ts            # detecção de ferramentas/IDEs no ambiente
 │   ├── installer.ts         # orquestra: escolhe adapters, grava, registra
-│   ├── runner.ts            # executar skill instalada (run)
-│   ├── publisher.ts         # publish: validar, copiar, atualizar index, commit
+│   ├── indexer.ts           # gera/verifica o index.json (derivado das skills)
+│   ├── lint.ts              # validação de skills (gate do CI)
+│   ├── eval.ts              # execução dos casos de eval
+│   ├── generator.ts         # `skills new` — esqueleto na estrutura recomendada
 │   └── adapters/            # um módulo por ferramenta (plugável)
 │       ├── types.ts         #   interface Adapter { id, detect(), apply(), remove() }
 │       ├── claude.ts
@@ -308,11 +320,35 @@ Diretórios usados em runtime na máquina do usuário:
 - **Git como backend:** sem servidor para manter; permissões e histórico vêm do
   próprio GitHub/GitLab interno. Limitação: descoberta é "puxada" (precisa de
   `update`), não tem estatísticas de uso em tempo real. Aceitável na v1.
-- **`publish` commita direto vs. abre PR:** v1 commita na branch; revisão por PR
-  fica como flag opcional (`--pr`) numa fase seguinte.
+- **Publicação só via Git/PR (sem comando que commita):** decisão deliberada de
+  governança — nada entra no catálogo sem crivo humano. O CLI ajuda o autor
+  localmente (`new`/`lint`/`eval`/`index`), mas o gate é o PR + CODEOWNERS.
+  Detalhes na seção 6.1.
 - **Sem sandbox de execução:** `skills run` executa código com a permissão do
   usuário. Mitigação v1: só instalar de repo interno confiável + revisão por PR.
   Sandbox (subprocesso isolado) fica para fase futura.
+
+---
+
+## 6.1 Governança: contribuição via Git/PR
+
+A criação de skills é **exclusivamente via Pull Request**, com **aprovação
+humana obrigatória**. Não há comando que envie skills para o repositório.
+
+```
+autor ── skills new ──► edita ── lint/eval/index (local) ──► PR
+                                                              │
+                          CI (typecheck, lint, index --check)│
+                                                              ▼
+                            review obrigatório (CODEOWNERS) ──► merge ──► catálogo
+```
+
+- **`index.json` é derivado, nunca editado à mão.** `skills index` regenera-o; o
+  CI roda `skills index --check` e barra o PR se estiver desatualizado.
+- **`.github/CODEOWNERS`** exige aprovação de um owner do catálogo para qualquer
+  mudança em `skills/`.
+- **Branch protection** (recomendado): `main` exige CI verde + ≥1 review de owner.
+- Fluxo completo do autor em [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ---
 
@@ -400,20 +436,20 @@ npm install -g @jorgemjuniorfitec/skills
 ## 8. Roadmap
 
 ### v1 — MVP (o essencial)
-- [ ] `init`, `update`, `search`, `info`, `list`
-- [ ] Parse e validação do `skill.yaml` (zod)
-- [ ] Leitura do `index.json`
-- [ ] `detect` + `doctor`: detecção de ferramentas/IDEs
-- [ ] `install` com assistente multi-ferramenta + adapters `claude`, `copilot`, `generic`
+- [x] `init`, `update`, `search`, `info`, `list`
+- [x] Parse e validação do `skill.yaml` (zod)
+- [x] Leitura do `index.json`
+- [x] `detect` + `doctor`: detecção de ferramentas/IDEs
+- [x] `install` com assistente multi-ferramenta + adapters `claude`, `copilot`, `generic`
+- [x] Autoria: `new`, `lint`, `eval`, `index`
+- [x] Governança via Git/PR: CODEOWNERS + CI (`lint` + `index --check`)
 - [ ] Publicar como `@jorgemjuniorfitec/skills` no GitHub Packages
 
-### v2 — Mais alvos, publicação e qualidade
+### v2 — Mais alvos e qualidade
 - [ ] Adapters `cursor`, `vscode`, `jetbrains`
 - [ ] `run` para skills do tipo `script`
-- [ ] `publish` com geração automática do `index.json`
-- [ ] `--pr` para abrir Pull Request em vez de commit direto
 - [ ] Versionamento (instalar versão específica, `skills update <nome>`)
-- [ ] Validação de schema mais rígida + lint de skills
+- [ ] Eval real de prompt/instruction (provider de IA)
 
 ### v3 — Conveniências
 - [ ] Cache de busca e ranking simples (mais instaladas primeiro)

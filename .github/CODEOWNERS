@@ -1,0 +1,9 @@
+# Toda contribuição ao catálogo de skills exige aprovação humana de um owner.
+# Ajuste os times/usuários conforme a estrutura real da organização.
+
+# Curadoria do catálogo de skills
+/skills/        @jorgemjuniorfitec
+
+# Código do CLI e automações
+/src/           @jorgemjuniorfitec
+/.github/       @jorgemjuniorfitec

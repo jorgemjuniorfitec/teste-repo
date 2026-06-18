@@ -27,6 +27,7 @@ import { getAdapter } from "./adapters/index.js";
 import { lintAll, lintSkill, type LintIssue } from "./lint.js";
 import { newSkill } from "./generator.js";
 import { runEval } from "./eval.js";
+import { checkIndexInSync, writeIndex } from "./indexer.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -226,6 +227,29 @@ export function buildProgram(): Command {
     .action(async (dir: string | undefined, opts: { dir: string }) => {
       const issues = dir ? await lintSkill(dir) : await lintAll(opts.dir);
       reportLint(issues);
+    });
+
+  program
+    .command("index")
+    .option("-d, --dir <pasta>", "pasta base do catálogo", "skills")
+    .option("-o, --out <arquivo>", "caminho do índice", "index.json")
+    .option("--check", "apenas verifica se o índice está em dia (não escreve)")
+    .description("gera/verifica o index.json a partir das skills")
+    .action(async (opts: { dir: string; out: string; check?: boolean }) => {
+      if (opts.check) {
+        const { inSync, reason } = await checkIndexInSync(opts.dir, opts.out);
+        if (inSync) {
+          console.log(chalk.green("✓ index.json está em dia."));
+        } else {
+          console.log(chalk.red(`✗ ${reason}. Rode "skills index" e commite.`));
+          process.exitCode = 1;
+        }
+        return;
+      }
+      const index = await writeIndex(opts.dir, opts.out);
+      console.log(
+        chalk.green(`✓ ${opts.out} gerado com ${index.skills.length} skill(s).`),
+      );
     });
 
   program
