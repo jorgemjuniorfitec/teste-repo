@@ -5,8 +5,11 @@ Sem interface gráfica, sem microserviços, sem servidor. O "backend" é um
 **repositório Git** que guarda as skills e um índice. O CLI (`skills`) clona/atualiza
 esse repo, busca, instala e publica skills.
 
-> Filosofia: usar o que já existe (Git + filesystem). A primeira versão precisa
-> ser instalável e útil em um dia.
+O CLI é escrito em **TypeScript** e distribuído como **pacote privado no NPM**
+(`@empresa/skills`), instalável com `npm install -g @empresa/skills`.
+
+> Filosofia: usar o que já existe (Git + NPM + filesystem). A primeira versão
+> precisa ser instalável e útil em um dia.
 
 ---
 
@@ -118,32 +121,33 @@ git push                          # ou o CLI abre um PR (config opcional)
 ## 5. Estrutura do Projeto (código do CLI)
 
 ```
-skills-marketplace/
-├── pyproject.toml            # empacotamento + dependência typer
+skills-cli/
+├── package.json             # nome @empresa/skills, bin "skills", scripts
+├── tsconfig.json
 ├── README.md
-├── ARCHITECTURE.md           # este documento
+├── ARCHITECTURE.md          # este documento
 ├── src/
-│   └── skills/
-│       ├── __init__.py
-│       ├── cli.py            # definição dos comandos (Typer)
-│       ├── config.py         # ~/.skills/config.toml (URL do repo, paths)
-│       ├── registry.py       # clone/pull do repo, leitura do index.json
-│       ├── manifest.py       # parse + validação do skill.yaml
-│       ├── installer.py      # copiar skill p/ ~/.skills, listar, remover
-│       ├── runner.py         # executar skill instalada (run)
-│       └── publisher.py      # publish: validar, copiar, atualizar index, commit
+│   ├── index.ts             # entrypoint do bin (shebang) + registro de comandos
+│   ├── cli.ts               # definição dos comandos (Commander)
+│   ├── config.ts            # ~/.skills/config.json (URL do repo, paths)
+│   ├── registry.ts          # clone/pull do repo, leitura do index.json
+│   ├── manifest.ts          # parse + validação do skill.yaml (zod)
+│   ├── installer.ts         # copiar skill p/ ~/.skills, listar, remover
+│   ├── runner.ts            # executar skill instalada (run)
+│   └── publisher.ts         # publish: validar, copiar, atualizar index, commit
+├── dist/                    # saída compilada (tsup) — publicada no NPM
 └── tests/
-    ├── test_manifest.py
-    ├── test_registry.py
-    └── test_installer.py
+    ├── manifest.test.ts
+    ├── registry.test.ts
+    └── installer.test.ts
 ```
 
 Diretórios usados em runtime na máquina do usuário:
 ```
 ~/.skills/
-├── config.toml              # URL do marketplace + preferências
-├── cache/                   # clone local do repo do marketplace
-└── installed/               # skills instaladas
+├── config.json             # URL do marketplace + preferências
+├── cache/                  # clone local do repo do marketplace
+└── installed/              # skills instaladas
     └── cep-lookup/
 ```
 
@@ -151,14 +155,15 @@ Diretórios usados em runtime na máquina do usuário:
 
 ## 6. Stack e Dependências
 
-| Item            | Escolha                  | Motivo                                      |
-|-----------------|--------------------------|---------------------------------------------|
-| Linguagem       | Python 3.11+             | pedido do time; bom p/ scripts e IA         |
-| Framework CLI   | Typer (+ Rich)           | comandos declarativos, help bonito          |
-| Manifesto       | YAML (`pyyaml`)          | legível para humanos                        |
-| Backend         | Git (subprocess/`git`)   | zero infra nova, versionamento de graça     |
-| Empacotamento   | `pyproject.toml` + pipx  | instalação global isolada (`pipx install`)  |
-| Testes          | pytest                   | padrão do ecossistema                       |
+| Item            | Escolha                       | Motivo                                          |
+|-----------------|-------------------------------|-------------------------------------------------|
+| Linguagem       | TypeScript (Node 18+)         | pedido do time; permite publicar no NPM         |
+| Framework CLI   | Commander (+ chalk/ora)       | comandos declarativos, help e spinners          |
+| Manifesto       | YAML (`yaml`) validado c/ zod | legível p/ humanos + validação de schema        |
+| Backend         | Git (via `simple-git`)        | zero infra nova, versionamento de graça         |
+| Build           | tsup (esbuild)                | bundle rápido de `src` → `dist`                 |
+| Distribuição    | NPM privado (`@empresa/skills`)| `npm install -g @empresa/skills`               |
+| Testes          | Vitest                        | rápido, integrado ao ecossistema TS             |
 
 ---
 
@@ -171,7 +176,48 @@ Diretórios usados em runtime na máquina do usuário:
   fica como flag opcional (`--pr`) numa fase seguinte.
 - **Sem sandbox de execução:** `skills run` executa código com a permissão do
   usuário. Mitigação v1: só instalar de repo interno confiável + revisão por PR.
-  Sandbox (container/venv isolado) fica para fase futura.
+  Sandbox (subprocesso isolado) fica para fase futura.
+
+---
+
+## 7.1 Distribuição via NPM privado
+
+O CLI é publicado como pacote **scoped privado** na conta NPM da empresa.
+
+`package.json` (trechos relevantes):
+```json
+{
+  "name": "@empresa/skills",
+  "version": "1.0.0",
+  "bin": { "skills": "dist/index.js" },
+  "files": ["dist"],
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "publishConfig": { "access": "restricted" },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --clean",
+    "prepublishOnly": "npm run build"
+  }
+}
+```
+
+Publicação:
+```bash
+npm login                          # autentica na conta da empresa
+npm publish                        # access "restricted" => pacote privado
+```
+
+Instalação pelos colaboradores (precisam de acesso à org/escopo `@empresa`):
+```bash
+# uma vez: aponta o escopo para o registry e autentica
+npm config set @empresa:registry https://registry.npmjs.org/
+npm install -g @empresa/skills
+```
+
+> Pré-requisito: o escopo `@empresa` precisa pertencer a uma **organização NPM
+> paga** (pacotes privados não são gratuitos). Alternativa, se já houver: um
+> registry interno (Verdaccio, GitHub Packages, Artifactory) — basta trocar o
+> `registry` no `npm config`.
 
 ---
 
@@ -179,9 +225,9 @@ Diretórios usados em runtime na máquina do usuário:
 
 ### v1 — MVP (o essencial)
 - [ ] `init`, `update`, `search`, `info`, `install`, `list`, `run`
-- [ ] Parse e validação do `skill.yaml`
+- [ ] Parse e validação do `skill.yaml` (zod)
 - [ ] Leitura do `index.json`
-- [ ] Empacotar como `pipx install skills`
+- [ ] Publicar como `@empresa/skills` no NPM privado
 
 ### v2 — Publicação e qualidade
 - [ ] `publish` com geração automática do `index.json`
@@ -192,13 +238,14 @@ Diretórios usados em runtime na máquina do usuário:
 ### v3 — Conveniências
 - [ ] Cache de busca e ranking simples (mais instaladas primeiro)
 - [ ] `skills stats` (contagem de instalações via metadados no repo)
-- [ ] Sandbox opcional de execução (venv isolado por skill)
+- [ ] Sandbox opcional de execução (subprocesso isolado por skill)
 
 ---
 
 ## 9. Próximos Passos
 
-1. Criar o repositório Git interno que servirá de marketplace (vazio, com 1 skill de exemplo).
-2. Scaffold do CLI Python (`pyproject.toml` + `src/skills/cli.py` com os comandos da v1).
-3. Implementar o caminho feliz: `init → update → search → install → run`.
-4. Empacotar com pipx e testar com 2–3 skills reais do time.
+1. Confirmar a conta/organização NPM (ou registry interno) e o escopo (`@empresa`).
+2. Criar o repositório Git interno que servirá de marketplace (vazio, com 1 skill de exemplo).
+3. Scaffold do CLI TypeScript (`package.json` + `src/cli.ts` com os comandos da v1).
+4. Implementar o caminho feliz: `init → update → search → install → run`.
+5. Publicar a `v0` no NPM privado e testar com 2–3 skills reais do time.
