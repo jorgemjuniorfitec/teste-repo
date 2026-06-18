@@ -1,240 +1,204 @@
-# Skills Marketplace — Arquitetura
+# Skills Marketplace (CLI) — Arquitetura
 
-## Visão Geral
+Marketplace **interno** de skills, operado inteiramente por **linha de comando**.
+Sem interface gráfica, sem microserviços, sem servidor. O "backend" é um
+**repositório Git** que guarda as skills e um índice. O CLI (`skills`) clona/atualiza
+esse repo, busca, instala e publica skills.
 
-Plataforma interna onde colaboradores publicam, descobrem, instalam e avaliam **skills** reutilizáveis (automações, agentes IA, scripts, ferramentas internas). O objetivo é reduzir retrabalho e criar um catálogo centralizado do conhecimento operacional da empresa.
-
----
-
-## 1. Entidades Principais
-
-```
-Skill
-├── id, slug, nome, descrição
-├── versão (semver)
-├── categoria / tags
-├── autor (User)
-├── artefato (arquivo, script, endpoint, prompt)
-├── metadados de execução (tipo, inputs, outputs)
-├── status (rascunho | publicado | depreciado)
-└── estatísticas (downloads, rating médio)
-
-User
-├── id, nome, email (SSO interno)
-├── skills publicadas
-├── skills instaladas
-└── papel (colaborador | revisor | admin)
-
-Review
-├── skill_id, user_id
-├── nota (1–5)
-└── comentário
-
-Installation
-├── user_id, skill_id, versão
-└── data de instalação
-
-Category
-└── id, nome, slug, ícone
-```
+> Filosofia: usar o que já existe (Git + filesystem). A primeira versão precisa
+> ser instalável e útil em um dia.
 
 ---
 
-## 2. Fluxos Principais
+## 1. Como funciona (visão geral)
 
-### 2.1 Publicar uma Skill
 ```
-Autor → Portal Web → preenche formulário + upload do artefato
-      → API (Node.js) → valida metadados e artefato
-      → Storage (S3/MinIO) ← armazena artefato
-      → Banco de dados ← persiste Skill (status: rascunho)
-      → [opcional] Revisor aprova → status: publicado
-      → Index de busca atualizado
-```
-
-### 2.2 Descobrir e Instalar uma Skill
-```
-Usuário → Portal Web → busca / filtra skills
-        → API → consulta Elasticsearch/Postgres
-        → retorna lista ranqueada (relevância + rating)
-        → Usuário seleciona → clica "Instalar"
-        → API registra Installation
-        → retorna instruções de uso (CLI, endpoint, SDK)
+┌─────────────────┐         git pull/push        ┌──────────────────────┐
+│  CLI `skills`   │ ───────────────────────────► │  Repositório Git      │
+│  (na máquina    │ ◄─────────────────────────── │  (o "marketplace")    │
+│   do usuário)   │                              │                       │
+└────────┬────────┘                              │  index.json           │
+         │ instala                               │  skills/              │
+         ▼                                       │    cep-lookup/        │
+┌─────────────────┐                              │      skill.yaml       │
+│ ~/.skills/      │                              │      main.py          │
+│   (skills       │                              │    gerar-relatorio/   │
+│    instaladas)  │                              │      skill.yaml       │
+└─────────────────┘                              └──────────────────────┘
 ```
 
-### 2.3 Integração com Sistemas Java Legados
-```
-Sistema Java → chama Integration Gateway (REST/gRPC)
-             → Gateway traduz para API interna
-             → pode publicar skills geradas por automações Java
-             → pode consultar o catálogo programaticamente
-```
+- **Marketplace = um repositório Git interno.** Cada skill é uma pasta.
+- **Publicar** = adicionar a pasta + atualizar `index.json` + commit/push (ou abrir PR).
+- **Instalar** = copiar a skill do repo clonado para `~/.skills/<nome>`.
+- **Descoberta** = ler o `index.json` (busca por nome, tag, descrição).
 
 ---
 
-## 3. Arquitetura de Serviços
+## 2. Anatomia de uma Skill
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Portal Web (Next.js)                  │
-│  Catálogo · Busca · Perfil · Publicação · Admin          │
-└──────────────────────┬──────────────────────────────────┘
-                       │ HTTPS / REST
-┌──────────────────────▼──────────────────────────────────┐
-│               API Gateway (Node.js / TypeScript)         │
-│  Authn/Authz (SSO) · Rate Limit · Roteamento             │
-└───┬────────────┬──────────────┬──────────────┬──────────┘
-    │            │              │              │
-┌───▼───┐  ┌────▼────┐  ┌──────▼──────┐  ┌───▼─────────┐
-│Catalog│  │Registry │  │Review/Rating│  │ Integration  │
-│Service│  │Service  │  │   Service   │  │  Gateway     │
-│(Node) │  │(Python) │  │   (Node)    │  │ (Java/Node)  │
-└───┬───┘  └────┬────┘  └──────┬──────┘  └─────────────┘
-    │            │              │
-┌───▼────────────▼──────────────▼──────────────────────────┐
-│                     PostgreSQL (principal)                │
-│        + Redis (cache + sessões)                         │
-│        + Elasticsearch (busca full-text)                 │
-│        + S3 / MinIO (artefatos de skills)                │
-└──────────────────────────────────────────────────────────┘
+Cada skill é uma pasta com um manifesto `skill.yaml`:
+
+```yaml
+# skills/cep-lookup/skill.yaml
+name: cep-lookup
+version: 1.0.0
+description: Consulta endereço a partir de um CEP
+author: jorge@empresa.com
+tags: [util, http, brasil]
+type: script            # script | prompt | template
+entrypoint: main.py     # arquivo executado ao rodar a skill
+runtime: python         # python | shell | none
 ```
 
-### Responsabilidades dos Serviços
+Tipos de skill suportados na v1:
 
-| Serviço | Stack | Responsabilidade |
-|---|---|---|
-| **Portal Web** | Next.js 14 + React + Tailwind | UI pública e admin |
-| **API Gateway** | Node.js + TypeScript (Fastify/Express) | Authn, roteamento, rate limit |
-| **Catalog Service** | Node.js + TypeScript | Listagem, busca, filtros, categorias |
-| **Registry Service** | Python (FastAPI) | Validação, versionamento, upload de artefatos |
-| **Review Service** | Node.js + TypeScript | Ratings, comentários, moderação |
-| **Integration Gateway** | Node.js ou Java Spring Boot | Bridge para sistemas internos legados |
+| type     | O que é                            | Como roda                       |
+|----------|------------------------------------|---------------------------------|
+| `script` | Script executável (Python/shell)   | `skills run <nome> [args]`      |
+| `prompt` | Prompt/template de IA              | copiado p/ uso manual ou agente |
+| `template`| Boilerplate de arquivos           | copiado para o diretório atual  |
 
 ---
 
-## 4. Modelo de Dados (PostgreSQL)
+## 3. O Índice (`index.json`)
 
-```sql
--- Usuários (sincronizado com SSO)
-users (id, email, name, role, created_at)
+Gerado/atualizado pelo CLI a partir dos `skill.yaml`. Evita varrer o repo inteiro
+em cada busca.
 
--- Categorias
-categories (id, slug, name, icon, parent_id)
-
--- Skills
-skills (id, slug, name, description, category_id, author_id,
-        artifact_url, artifact_type, version, status,
-        install_count, avg_rating, created_at, updated_at)
-
--- Versões de skills
-skill_versions (id, skill_id, version, artifact_url,
-                changelog, created_at)
-
--- Instalações
-installations (id, user_id, skill_id, version, installed_at)
-
--- Reviews
-reviews (id, skill_id, user_id, rating, comment, created_at)
-
--- Tags
-tags (id, name)
-skill_tags (skill_id, tag_id)
+```json
+{
+  "updated_at": "2026-06-18T10:00:00Z",
+  "skills": [
+    {
+      "name": "cep-lookup",
+      "version": "1.0.0",
+      "description": "Consulta endereço a partir de um CEP",
+      "author": "jorge@empresa.com",
+      "tags": ["util", "http", "brasil"],
+      "path": "skills/cep-lookup"
+    }
+  ]
+}
 ```
 
 ---
 
-## 5. Autenticação e Autorização
+## 4. Comandos do CLI (v1)
 
-- **SSO interno** (SAML 2.0 / OIDC) — nenhum cadastro manual.
-- JWT com refresh token gerenciado pelo API Gateway.
-- Papéis: `viewer`, `publisher`, `reviewer`, `admin`.
-- Skills privadas: visíveis apenas a times específicos (RBAC por grupo).
+```bash
+skills init                 # configura o repo do marketplace (URL Git) localmente
+skills update               # git pull do repo do marketplace
+skills search <termo>       # busca no index.json (nome/desc/tags)
+skills info <nome>          # mostra detalhes de uma skill
+skills install <nome>       # copia a skill para ~/.skills/<nome>
+skills list                 # lista skills instaladas localmente
+skills run <nome> [args]    # executa uma skill instalada
+skills publish <pasta>      # valida, adiciona ao repo, atualiza index e commita
+skills remove <nome>        # remove skill instalada localmente
+```
 
----
+Fluxo típico de quem **consome**:
+```bash
+skills init https://git.empresa.com/skills-marketplace.git
+skills update
+skills search relatorio
+skills install gerar-relatorio
+skills run gerar-relatorio --mes 06
+```
 
-## 6. Tipos de Artefato Suportados
-
-| Tipo | Formato | Execução |
-|---|---|---|
-| **Script** | `.py`, `.sh`, `.js` | Via CLI local |
-| **API/Endpoint** | URL + spec OpenAPI | Chamada REST |
-| **Agente IA** | Prompt + config MCP | Claude Code / SDK |
-| **Automação Java** | JAR + parâmetros | Invocado pelo Integration Gateway |
-| **Workflow** | JSON (n8n, Prefect) | Engine de workflow |
-
----
-
-## 7. Roadmap de Implementação
-
-### Fase 1 — MVP (4–6 semanas)
-- [ ] Scaffold do monorepo (Next.js + API Node.js)
-- [ ] Autenticação SSO
-- [ ] CRUD de skills (sem workflow de aprovação)
-- [ ] Listagem, busca simples e página de detalhe
-- [ ] Upload de artefato para S3/MinIO
-- [ ] Instalação (registro + instruções de uso)
-
-### Fase 2 — Qualidade e Descoberta (4 semanas)
-- [ ] Sistema de reviews e ratings
-- [ ] Busca full-text com Elasticsearch
-- [ ] Categorias e tags
-- [ ] Workflow de aprovação por revisores
-- [ ] Versionamento de skills
-
-### Fase 3 — Integração e Escala (4–6 semanas)
-- [ ] Integration Gateway para sistemas Java
-- [ ] Analytics de uso por skill
-- [ ] Notificações (nova versão, aprovação, review)
-- [ ] CLI para instalar/publicar skills via terminal
-- [ ] API pública documentada (Swagger/OpenAPI)
+Fluxo típico de quem **publica**:
+```bash
+skills publish ./minha-skill      # valida o skill.yaml, copia p/ repo clonado
+                                  # atualiza index.json e faz commit
+git push                          # ou o CLI abre um PR (config opcional)
+```
 
 ---
 
-## 8. Estrutura de Pastas Proposta
+## 5. Estrutura do Projeto (código do CLI)
 
 ```
 skills-marketplace/
-├── apps/
-│   ├── web/                  # Next.js — portal
-│   └── api/                  # Node.js — API Gateway + serviços
-│       ├── src/
-│       │   ├── catalog/
-│       │   ├── registry/
-│       │   ├── reviews/
-│       │   └── auth/
-│       └── ...
-├── services/
-│   ├── registry-python/      # FastAPI — validação de artefatos
-│   └── integration-gateway/  # Bridge Java/Node
-├── packages/
-│   ├── sdk/                  # SDK TypeScript para consumir skills
-│   └── ui/                   # Design system compartilhado
-├── infra/
-│   ├── docker-compose.yml    # Dev local (Postgres, Redis, MinIO, ES)
-│   └── k8s/                  # Manifests de produção
-└── docs/
-    └── ARCHITECTURE.md       # Este documento
+├── pyproject.toml            # empacotamento + dependência typer
+├── README.md
+├── ARCHITECTURE.md           # este documento
+├── src/
+│   └── skills/
+│       ├── __init__.py
+│       ├── cli.py            # definição dos comandos (Typer)
+│       ├── config.py         # ~/.skills/config.toml (URL do repo, paths)
+│       ├── registry.py       # clone/pull do repo, leitura do index.json
+│       ├── manifest.py       # parse + validação do skill.yaml
+│       ├── installer.py      # copiar skill p/ ~/.skills, listar, remover
+│       ├── runner.py         # executar skill instalada (run)
+│       └── publisher.py      # publish: validar, copiar, atualizar index, commit
+└── tests/
+    ├── test_manifest.py
+    ├── test_registry.py
+    └── test_installer.py
+```
+
+Diretórios usados em runtime na máquina do usuário:
+```
+~/.skills/
+├── config.toml              # URL do marketplace + preferências
+├── cache/                   # clone local do repo do marketplace
+└── installed/               # skills instaladas
+    └── cep-lookup/
 ```
 
 ---
 
-## 9. Decisões Técnicas e Trade-offs
+## 6. Stack e Dependências
 
-| Decisão | Escolha | Alternativa descartada | Motivo |
-|---|---|---|---|
-| Monorepo | Turborepo | Polyrepo | Facilita shared packages e CI unificado |
-| ORM | Prisma (Node) + SQLAlchemy (Python) | Raw SQL | Migrations e type-safety |
-| Busca | Elasticsearch | Postgres full-text | Escalabilidade e ranking |
-| Storage | MinIO (self-hosted) | S3 AWS | Controle interno de dados |
-| Auth | OIDC/SSO existente | Auth próprio | Evita gestão de credenciais |
-| API style | REST + OpenAPI | GraphQL | Adoção mais simples para integrações Java |
+| Item            | Escolha                  | Motivo                                      |
+|-----------------|--------------------------|---------------------------------------------|
+| Linguagem       | Python 3.11+             | pedido do time; bom p/ scripts e IA         |
+| Framework CLI   | Typer (+ Rich)           | comandos declarativos, help bonito          |
+| Manifesto       | YAML (`pyyaml`)          | legível para humanos                        |
+| Backend         | Git (subprocess/`git`)   | zero infra nova, versionamento de graça     |
+| Empacotamento   | `pyproject.toml` + pipx  | instalação global isolada (`pipx install`)  |
+| Testes          | pytest                   | padrão do ecossistema                       |
 
 ---
 
-## 10. Próximos Passos Imediatos
+## 7. Decisões e Trade-offs
 
-1. Validar este documento com os stakeholders técnicos.
-2. Definir o SSO interno disponível (Keycloak? Azure AD? Google Workspace?).
-3. Confirmar onde rodar a infra (on-premise, AWS, GCP).
-4. Montar o scaffold do monorepo e subir o `docker-compose` de dev.
-5. Criar o primeiro épico no board de tarefas com as tasks da Fase 1.
+- **Git como backend:** sem servidor para manter; permissões e histórico vêm do
+  próprio GitHub/GitLab interno. Limitação: descoberta é "puxada" (precisa de
+  `update`), não tem estatísticas de uso em tempo real. Aceitável na v1.
+- **`publish` commita direto vs. abre PR:** v1 commita na branch; revisão por PR
+  fica como flag opcional (`--pr`) numa fase seguinte.
+- **Sem sandbox de execução:** `skills run` executa código com a permissão do
+  usuário. Mitigação v1: só instalar de repo interno confiável + revisão por PR.
+  Sandbox (container/venv isolado) fica para fase futura.
+
+---
+
+## 8. Roadmap
+
+### v1 — MVP (o essencial)
+- [ ] `init`, `update`, `search`, `info`, `install`, `list`, `run`
+- [ ] Parse e validação do `skill.yaml`
+- [ ] Leitura do `index.json`
+- [ ] Empacotar como `pipx install skills`
+
+### v2 — Publicação e qualidade
+- [ ] `publish` com geração automática do `index.json`
+- [ ] `--pr` para abrir Pull Request em vez de commit direto
+- [ ] Versionamento (instalar versão específica, `skills update <nome>`)
+- [ ] Validação de schema mais rígida + lint de skills
+
+### v3 — Conveniências
+- [ ] Cache de busca e ranking simples (mais instaladas primeiro)
+- [ ] `skills stats` (contagem de instalações via metadados no repo)
+- [ ] Sandbox opcional de execução (venv isolado por skill)
+
+---
+
+## 9. Próximos Passos
+
+1. Criar o repositório Git interno que servirá de marketplace (vazio, com 1 skill de exemplo).
+2. Scaffold do CLI Python (`pyproject.toml` + `src/skills/cli.py` com os comandos da v1).
+3. Implementar o caminho feliz: `init → update → search → install → run`.
+4. Empacotar com pipx e testar com 2–3 skills reais do time.
